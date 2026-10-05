@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFT↔MEME 兑换测试台</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<style>
+:root{--bg:#e9edf3;--panel:#fff;--ink:#17213a;--sub:#5d6880;--line:#cfd6e3;--acc:#1f4fd8;--ok:#13795b;--err:#b3261e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:760px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:26px;margin:0 0 4px;letter-spacing:.5px}
+.sub{color:var(--sub);margin:0 0 22px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:16px}
+h2{font-size:17px;margin:0 0 12px}
+label{display:block;font-size:13px;color:var(--sub);margin:10px 0 4px}
+input,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:6px;font:inherit;color:var(--ink);background:#fbfcfe}
+input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+button{margin-top:12px;padding:9px 16px;border:0;border-radius:6px;background:var(--acc);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:#e3e9f8;color:var(--acc)}
+button:disabled{opacity:.5;cursor:wait}
+.row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.row>div{flex:1;min-width:180px}
+.info{margin-top:12px;padding:10px 12px;background:#f2f5fb;border-radius:6px;font-size:13.5px;word-break:break-all;display:none}
+#log{white-space:pre-wrap;word-break:break-all;font-size:13.5px;min-height:48px}
+.ok{color:var(--ok)}.err{color:var(--err)}
+a{color:var(--acc)}
+</style>
+</head>
+<body>
+<main>
+<h1>NFT↔MEME 兑换测试台</h1>
+<p class="sub">Sepolia 测试网 · 创建 MEME 币、存入 NFT 换币、用币换回 NFT</p>
+
+<section>
+  <h2>1. 连接钱包与工厂合约</h2>
+  <button id="btnConnect">连接钱包</button>
+  <span id="acct" class="sub"></span>
+  <label>Factory 合约地址（你在 Remix 部署的 MemeFactory）</label>
+  <input id="factory" placeholder="0x...">
+</section>
+
+<section>
+  <h2>2. 创建 MEME 币</h2>
+  <label>NFT 合约地址（必填，需支持 ERC721Enumerable）</label>
+  <input id="cNft" placeholder="0x...">
+  <div class="row">
+    <div><label>MEME 币名称（必填）</label><input id="cName" placeholder="例如 Bored Meme"></div>
+    <div><label>MEME 币代码（必填）</label><input id="cSym" placeholder="例如 BMEME"></div>
+  </div>
+  <label>项目描述（选填）</label>
+  <textarea id="cDesc" rows="2"></textarea>
+  <button id="btnCreate">创建 MEME 币</button>
+</section>
+
+<section>
+  <h2>3. 兑换</h2>
+  <label>Vault 合约地址（创建成功后会自动填入）</label>
+  <div class="row">
+    <div><input id="vault" placeholder="0x..."></div>
+    <button class="ghost" id="btnLoad" style="margin-top:0">加载项目</button>
+  </div>
+  <div class="info" id="info"></div>
+
+  <label>存入 NFT：填写你拥有的 tokenId，换取 10,000,000 枚 MEME</label>
+  <div class="row">
+    <div><input id="inId" type="number" min="0" placeholder="tokenId"></div>
+    <button id="btnIn" style="margin-top:0">存入 NFT</button>
+  </div>
+
+  <label>换回 NFT：填写 Vault 里的 tokenId，支付 10,000,000 枚 MEME</label>
+  <div class="row">
+    <div><input id="outId" type="number" min="0" placeholder="tokenId"></div>
+    <button id="btnOut" style="margin-top:0">换回 NFT</button>
+  </div>
+</section>
+
+<section>
+  <h2>运行记录</h2>
+  <div id="log">等待操作…</div>
+</section>
+</main>
+
+<script>
+const { ethers } = window;
+const SEPOLIA = 11155111;
+const FACTORY_ABI = [
+  "function createMeme(address nft,string name,string symbol,string description) returns (address)",
+  "event MemeCreated(address indexed nft,address indexed vault,address indexed creator,string name,string symbol,string description)"
+];
+const VAULT_ABI = [
+  "function name() view returns (string)","function symbol() view returns (string)",
+  "function balanceOf(address) view returns (uint256)","function nft() view returns (address)",
+  "function redeem(uint256 tokenId)"
+];
+const NFT_ABI = [
+  "function ownerOf(uint256) view returns (address)","function balanceOf(address) view returns (uint256)",
+  "function tokenOfOwnerByIndex(address,uint256) view returns (uint256)",
+  "function safeTransferFrom(address from,address to,uint256 tokenId)"
+];
+const $ = id => document.getElementById(id);
+let provider, signer, me;
+
+try { $("factory").value = localStorage.getItem("factory") || ""; } catch(e){}
+
+function log(msg, cls){ $("log").innerHTML = `<span class="${cls||""}">${msg}</span>`; }
+const scan = h => `<a target="_blank" href="https://sepolia.etherscan.io/tx/${h}">${h}</a>`;
+const fmt = x => (x / 10n**18n).toLocaleString("en-US");
+const errMsg = e => e.shortMessage || e.reason || e.message || String(e);
+
+async function run(btn, fn){
+  btn.disabled = true;
+  try { await fn(); } catch(e){ log("出错：" + errMsg(e), "err"); }
+  btn.disabled = false;
+}
+async function needWallet(){
+  if(!signer) throw new Error("请先点击“连接钱包”");
+}
+
+$("btnConnect").onclick = e => run(e.target, async () => {
+  if(!window.ethereum) throw new Error("没有检测到 MetaMask，请安装钱包插件");
+  provider = new ethers.BrowserProvider(window.ethereum);
+  await provider.send("eth_requestAccounts", []);
+  const net = await provider.getNetwork();
+  if(Number(net.chainId) !== SEPOLIA){
+    await provider.send("wallet_switchEthereumChain", [{ chainId: "0xaa36a7" }]);
+    provider = new ethers.BrowserProvider(window.ethereum);
+  }
+  signer = await provider.getSigner();
+  me = await signer.getAddress();
+  $("acct").textContent = me.slice(0,6) + "…" + me.slice(-4);
+  log("钱包已连接（Sepolia）", "ok");
+});
+
+$("btnCreate").onclick = e => run(e.target, async () => {
+  await needWallet();
+  const f = $("factory").value.trim();
+  if(!ethers.isAddress(f)) throw new Error("请填写正确的 Factory 地址");
+  try { localStorage.setItem("factory", f); } catch(_){}
+  const nft = $("cNft").value.trim(), name = $("cName").value.trim(), sym = $("cSym").value.trim();
+  if(!ethers.isAddress(nft) || !name || !sym) throw new Error("NFT 地址、名称、代码都必须填写");
+  const c = new ethers.Contract(f, FACTORY_ABI, signer);
+  const tx = await c.createMeme(nft, name, sym, $("cDesc").value.trim());
+  log("交易已发送，等待上链…<br>" + scan(tx.hash));
+  const rc = await tx.wait();
+  let vault;
+  for(const l of rc.logs){
+    try { const p = c.interface.parseLog(l); if(p && p.name === "MemeCreated"){ vault = p.args.vault; } } catch(_){}
+  }
+  if(!vault) throw new Error("交易成功，但没有找到 Vault 地址，请到 Etherscan 查看");
+  $("vault").value = vault;
+  log("创建成功！Vault 地址：" + vault + "<br>" + scan(tx.hash), "ok");
+  await loadVault();
+});
+
+async function loadVault(){
+  await needWallet();
+  const v = $("vault").value.trim();
+  if(!ethers.isAddress(v)) throw new Error("请填写正确的 Vault 地址");
+  const vault = new ethers.Contract(v, VAULT_ABI, provider);
+  const nftAddr = await vault.nft();
+  const nft = new ethers.Contract(nftAddr, NFT_ABI, provider);
+  const [name, sym, vBal, mBal, nftCount] = await Promise.all([
+    vault.name(), vault.symbol(), vault.balanceOf(v), vault.balanceOf(me), nft.balanceOf(v)
+  ]);
+  const ids = [];
+  for(let i = 0n; i < nftCount && i < 30n; i++) ids.push((await nft.tokenOfOwnerByIndex(v, i)).toString());
+  const box = $("info");
+  box.style.display = "block";
+  box.innerHTML =
+    `<b>${name}（${sym}）</b><br>绑定 NFT：${nftAddr}<br>` +
+    `Vault 内 MEME：${fmt(vBal)}<br>我的 MEME：${fmt(mBal)}<br>` +
+    `Vault 内的 NFT tokenId：${ids.length ? ids.join(", ") : "（暂无）"}`;
+}
+$("btnLoad").onclick = e => run(e.target, async () => { await loadVault(); log("已加载项目信息", "ok"); });
+
+$("btnIn").onclick = e => run(e.target, async () => {
+  await needWallet();
+  const v = $("vault").value.trim(), id = $("inId").value;
+  if(!ethers.isAddress(v) || id === "") throw new Error("请填写 Vault 地址和 tokenId");
+  const nftAddr = await new ethers.Contract(v, VAULT_ABI, provider).nft();
+  const nft = new ethers.Contract(nftAddr, NFT_ABI, signer);
+  const owner = await nft.ownerOf(id);
+  if(owner.toLowerCase() !== me.toLowerCase()) throw new Error("这个 tokenId 不属于你当前的钱包");
+  const tx = await nft.safeTransferFrom(me, v, id);
+  log("交易已发送，等待上链…<br>" + scan(tx.hash));
+  await tx.wait();
+  await loadVault();
+  log("存入成功，已收到 10,000,000 枚 MEME<br>" + scan(tx.hash), "ok");
+});
+
+$("btnOut").onclick = e => run(e.target, async () => {
+  await needWallet();
+  const v = $("vault").value.trim(), id = $("outId").value;
+  if(!ethers.isAddress(v) || id === "") throw new Error("请填写 Vault 地址和 tokenId");
+  const vault = new ethers.Contract(v, VAULT_ABI, signer);
+  const bal = await vault.balanceOf(me);
+  if(bal < 10_000_000n * 10n**18n) throw new Error("你的 MEME 不足 10,000,000 枚");
+  const tx = await vault.redeem(id);
+  log("交易已发送，等待上链…<br>" + scan(tx.hash));
+  await tx.wait();
+  await loadVault();
+  log("换回成功，NFT 已到你的钱包<br>" + scan(tx.hash), "ok");
+});
+</script>
+</body>
+</html>
