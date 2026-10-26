@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFT Meme 币发行与兑换平台 · Sepolia</title>
+<style>
+  :root {
+    --bg: #f5f6fa; --card: #ffffff; --text: #1c2030; --muted: #6b7185; --line: #e3e6ef;
+    --accent: #5b5bf0; --accent-text: #ffffff; --ok: #1f9d55; --err: #d33a3a; --warn: #b7791f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12141c; --card: #1b1e2a; --text: #e7e9f2; --muted: #9096ab; --line: #2b3040;
+      --accent: #7c7cff; --accent-text: #10121a; --ok: #46c27c; --err: #ff6b6b; --warn: #e0a84a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 0 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  .sub { color: var(--muted); font-size: 12px; word-break: break-all; }
+  a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--card); color: var(--text);
+    padding: 8px 14px; border-radius: 8px; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  nav { display: flex; gap: 8px; margin-bottom: 16px; }
+  nav button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  .card h3 { margin: 0 0 2px; font-size: 17px; }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--bg); color: var(--muted); border: 1px solid var(--line); margin-left: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 20px; margin-top: 10px; }
+  .row { display: flex; flex-direction: column; min-width: 0; }
+  .row .k { color: var(--muted); font-size: 12px; }
+  .row .v { word-break: break-all; }
+  .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+  .desc { margin-top: 10px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+  .actions { margin-top: 12px; display: flex; gap: 8px; }
+  .pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 12px 0; color: var(--muted); }
+  label { display: block; margin: 12px 0 4px; font-weight: 600; }
+  label small { font-weight: 400; color: var(--muted); }
+  input, textarea { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 9px 11px; }
+  textarea { min-height: 90px; resize: vertical; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .hint.warn { color: var(--warn); } .hint.err { color: var(--err); } .hint.ok { color: var(--ok); }
+  #status { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: 92vw; z-index: 99;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; display: none;
+    box-shadow: 0 6px 24px rgba(0,0,0,.2); word-break: break-word; }
+  #status.err { border-color: var(--err); color: var(--err); } #status.ok { border-color: var(--ok); color: var(--ok); }
+  dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text);
+    width: min(720px, 94vw); padding: 18px; }
+  dialog::backdrop { background: rgba(0,0,0,.5); }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 12px; }
+  .box { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .box h4 { margin: 0 0 4px; }
+  .empty { text-align: center; color: var(--muted); padding: 32px 0; }
+  .result { border: 1px solid var(--ok); border-radius: 10px; padding: 12px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>NFT 绑定 Meme 币发行与双向兑换平台</h1>
+      <div class="sub">Sepolia 测试网 · 合约 <a id="contractLink" target="_blank" rel="noopener"></a></div>
+    </div>
+    <div>
+      <span id="acct" class="sub"></span>
+      <button id="btnConnect" class="primary">连接钱包</button>
+    </div>
+  </header>
+
+  <nav>
+    <button data-tab="list" class="active">项目列表</button>
+    <button data-tab="create">创建 Meme 币</button>
+  </nav>
+
+  <!-- 项目列表 -->
+  <section id="tab-list">
+    <div id="list"></div>
+    <div class="pager">
+      <button id="prev">上一页</button>
+      <span id="pageInfo"></span>
+      <button id="next">下一页</button>
+      <button id="refresh">刷新</button>
+    </div>
+  </section>
+
+  <!-- 创建 -->
+  <section id="tab-create" hidden>
+    <div class="card">
+      <h3>创建 Meme 币</h3>
+      <div class="hint">创建者须至少持有该 NFT 项目的 1 枚 NFT;同一 NFT 合约每 10 天最多创建 1 个。NFT 名称与总量由创建者自行填写,协议不验证真实性。</div>
+
+      <label>NFT 合约地址 <small>(必填)</small></label>
+      <input id="fNft" placeholder="0x..." autocomplete="off">
+      <div id="nftHint" class="hint"></div>
+
+      <label>NFT 名称 <small>(必填,≤120 字节)</small></label>
+      <input id="fNftName" data-max="120">
+      <div class="hint" data-count="fNftName"></div>
+
+      <label>NFT 总量 N <small>(必填,1 ~ 50000)</small></label>
+      <input id="fN" type="number" min="1" max="50000" step="1">
+      <div id="supplyHint" class="hint"></div>
+
+      <label>Meme 币名称 <small>(必填,≤51 字节)</small></label>
+      <input id="fMemeName" data-max="51">
+      <div class="hint" data-count="fMemeName"></div>
+
+      <label>Meme 币代码 Symbol <small>(必填,≤11 字节)</small></label>
+      <input id="fSymbol" data-max="11">
+      <div class="hint" data-count="fSymbol"></div>
+
+      <label>项目描述 <small>(选填,≤400 字节)</small></label>
+      <textarea id="fDesc" data-max="400"></textarea>
+      <div class="hint" data-count="fDesc"></div>
+
+      <div class="actions"><button id="btnCreate" class="primary">创建</button></div>
+      <div id="createResult"></div>
+    </div>
+  </section>
+
+  <p class="sub" style="text-align:center;margin-top:24px">静态页面 · 所有数据直接读取链上合约,不依赖后端服务器</p>
+</div>
+
+<!-- 兑换弹窗 -->
+<dialog id="swapDlg">
+  <div style="display:flex;justify-content:space-between;gap:8px">
+    <div>
+      <h3 id="swTitle" style="margin:0"></h3>
+      <div class="sub">1 枚 NFT = 10,000,000 枚 Meme 币 · 无手续费 · 单次 1~20 枚</div>
+    </div>
+    <button id="swClose">关闭</button>
+  </div>
+  <div class="grid" style="margin-top:12px">
+    <div class="row"><span class="k">Vault 地址</span><span class="v mono" id="swVault"></span></div>
+    <div class="row"><span class="k">Vault 中可领取的 NFT</span><span class="v" id="swCount"></span></div>
+    <div class="row"><span class="k">我的 Meme 币余额</span><span class="v" id="swBal">-</span></div>
+    <div class="row"><span class="k">我对 Vault 的 Meme 币授权</span><span class="v" id="swAllow">-</span></div>
+    <div class="row"><span class="k">我已授权 Vault 操作 NFT</span><span class="v" id="swApproved">-</span></div>
+  </div>
+  <div class="cols">
+    <div class="box">
+      <h4>NFT → Meme 币(存入)</h4>
+      <div class="hint">输入你要存入的 tokenId,用逗号或空格分隔,最多 20 个。首次存入需先授权(自动发起)。</div>
+      <input id="swIds" placeholder="例如:1, 2, 3">
+      <div class="actions"><button id="btnDeposit" class="primary">存入 NFT</button></div>
+    </div>
+    <div class="box">
+      <h4>Meme 币 → NFT(取出)</h4>
+      <div class="hint">按数量取出,协议从 Vault 数组末尾依次取出 NFT。授权额度不足时会先发起授权。</div>
+      <input id="swQty" type="number" min="1" max="20" step="1" placeholder="取出数量 1~20">
+      <div id="swNeed" class="hint"></div>
+      <div class="actions"><button id="btnWithdraw" class="primary">取出 NFT</button></div>
+    </div>
+  </div>
+</dialog>
+
+<div id="status"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<script>
+// ======================= 配置 =======================
+const CONFIG = {
+  // 注意:重新部署合约后,请把这里换成新的合约地址
+  address: "0xe34587056bB192568fa2836029C5892993e120b3".toLowerCase(),
+  chainId: 11155111,
+  chainIdHex: "0xaa36a7",
+  rpc: "https://ethereum-sepolia-rpc.publicnode.com",   // 只读用公共 RPC,可替换成你自己的
+  explorer: "https://sepolia.etherscan.io",
+  pageSize: 10
+};
+
+const VIEW = "tuple(uint256 projectId,address nftAddress,string nftName,uint256 nftTotal,uint256 vaultNftCount,address memeAddress,string memeName,string memeSymbol,address vaultAddress,address creator,uint256 createdAt,string description)";
+const ABI_LAUNCHPAD = [
+  "function totalProjects() view returns (uint256)",
+  `function getProjectsDesc(uint256 offset,uint256 limit) view returns (${VIEW}[])`,
+  "function nextCreateTime(address nft) view returns (uint256)",
+  "function createMeme(address,string,uint256,string,string,string) returns (uint256,address,address)",
+  `event MemeCreated(uint256 indexed projectId,address indexed nft,address indexed creator,${VIEW} info)`
+];
+const ABI_VAULT = [
+  "function nftCount() view returns (uint256)",
+  "function deposit(uint256[] ids)",
+  "function withdraw(uint256 count)"
+];
+const ABI_ERC20 = [
+  "function balanceOf(address) view returns (uint256)",
+  "function allowance(address,address) view returns (uint256)",
+  "function approve(address,uint256) returns (bool)"
+];
+const ABI_ERC721 = [
+  "function balanceOf(address) view returns (uint256)",
+  "function ownerOf(uint256) view returns (address)",
+  "function isApprovedForAll(address,address) view returns (bool)",
+  "function setApprovalForAll(address,bool)"
+];
+const MEME_PER_NFT = ethers.parseUnits("10000000", 18);
+
+// ======================= 工具 =======================
+const $ = (s, r = document) => r.querySelector(s);
+const readProvider = new ethers.JsonRpcProvider(CONFIG.rpc, ethers.Network.from(CONFIG.chainId), { staticNetwork: ethers.Network.from(CONFIG.chainId) });
+const launchpadRead = new ethers.Contract(CONFIG.address, ABI_LAUNCHPAD, readProvider);
+let signer = null, account = null;
+
+function status(msg, type = "", keep = false) {
+  const el = $("#status");
+  el.textContent = msg; el.className = type; el.style.display = "block";
+  clearTimeout(status.t);
+  if (!keep) status.t = setTimeout(() => (el.style.display = "none"), type === "err" ? 8000 : 4000);
+}
+// ---- 自定义错误解码:把合约 revert 的 4 字节错误选择器翻译成中文提示 ----
+const ERR_IFACE = new ethers.Interface([
+  // 平台合约(Launchpad / Vault)
+  "error Reentrant()", "error OnlyFactory()", "error AlreadyInitialized()", "error InvalidCount()",
+  "error InsufficientMemeInVault()", "error MemeTransferFailed()", "error NotEnoughNftsInVault()",
+  "error InsufficientMemeBalance()", "error InsufficientMemeAllowance()", "error MemePaymentFailed()", "error UseDeposit()",
+  "error InvalidNftName()", "error InvalidMemeName()", "error InvalidMemeSymbol()", "error DescriptionTooLong()",
+  "error InvalidNftTotal()", "error ZeroNftAddress()", "error NftNotContract()", "error NotERC721()", "error NoMetadata()",
+  "error CreatorHoldsNoNft()", "error BalanceOfFailed()", "error CooldownActive(uint256 availableAt)", "error InvalidProjectId()",
+  // OpenZeppelin 5.x 常见错误(Meme 币 ERC20 与常见 ERC721)
+  "error ERC20InsufficientBalance(address sender,uint256 balance,uint256 needed)",
+  "error ERC20InsufficientAllowance(address spender,uint256 allowance,uint256 needed)",
+  "error ERC721InsufficientApproval(address operator,uint256 tokenId)",
+  "error ERC721NonexistentToken(uint256 tokenId)",
+  "error ERC721IncorrectOwner(address sender,uint256 tokenId,address owner)"
+]);
+const ERR_MSG = {
+  Reentrant: "操作被重入保护拒绝,请稍后重试",
+  OnlyFactory: "只有发币平台合约才能执行该操作",
+  AlreadyInitialized: "该 Vault 已初始化",
+  InvalidCount: "单次数量必须为 1 ~ 20",
+  InsufficientMemeInVault: "Vault 中的 Meme 币不足以支付本次存入(可能是创建者填写的 N 大于 NFT 实际总量)",
+  MemeTransferFailed: "Meme 币转账失败",
+  NotEnoughNftsInVault: "Vault 中的 NFT 数量不足",
+  InsufficientMemeBalance: "你的 Meme 币余额不足",
+  InsufficientMemeAllowance: "你对 Vault 的 Meme 币授权额度不足",
+  MemePaymentFailed: "Meme 币支付失败",
+  UseDeposit: "NFT 只能通过「存入」流程进入 Vault",
+  InvalidNftName: "NFT 名称必填且不超过 120 字节",
+  InvalidMemeName: "Meme 币名称必填且不超过 51 字节",
+  InvalidMemeSymbol: "Meme 币代码必填且不超过 11 字节",
+  DescriptionTooLong: "项目描述不能超过 400 字节",
+  InvalidNftTotal: "NFT 总量 N 必须在 1 ~ 50000 之间",
+  ZeroNftAddress: "NFT 合约地址不能为零地址",
+  NftNotContract: "该地址不是合约地址",
+  NotERC721: "该合约不支持 ERC721 接口(ERC165 检测未通过)",
+  NoMetadata: "该合约不支持 ERC721 Metadata 接口",
+  CreatorHoldsNoNft: "你的钱包未持有该 NFT 项目的 NFT,无法创建",
+  BalanceOfFailed: "读取你在该 NFT 合约中的持有量失败",
+  CooldownActive: a => `该 NFT 合约仍在冷却期,${new Date(Number(a[0]) * 1000).toLocaleString()} 之后才能再创建`,
+  InvalidProjectId: "项目编号无效",
+  ERC20InsufficientBalance: "Meme 币余额不足",
+  ERC20InsufficientAllowance: "Meme 币授权额度不足",
+  ERC721InsufficientApproval: "该 NFT 尚未授权给 Vault",
+  ERC721NonexistentToken: "该 tokenId 不存在",
+  ERC721IncorrectOwner: "该 tokenId 不属于你的钱包"
+};
+function revertData(e) {
+  const cands = [e?.data, e?.error?.data, e?.info?.error?.data, e?.info?.error?.data?.data, e?.error?.data?.data];
+  for (const d of cands) if (typeof d === "string" && /^0x[0-9a-fA-F]{8,}/.test(d)) return d;
+  return null;
+}
+function decodeRevert(e) {
+  const data = revertData(e);
+  if (!data) return null;
+  try {
+    const pe = ERR_IFACE.parseError(data);
+    if (pe) {
+      const m = ERR_MSG[pe.name];
+      if (m) return typeof m === "function" ? m(pe.args) : m;
+      if (pe.name === "Error") return String(pe.args[0]);          // 旧式 require("...") 字符串
+      if (pe.name === "Panic") return "合约执行异常(Panic)";
+    }
+  } catch (_) {}
+  return `合约拒绝了该操作(未知错误 ${data.slice(0, 10)})`;
+}
+function errText(e) {
+  if (e && (e.code === "ACTION_REJECTED" || e.code === 4001)) return "你已取消该操作";
+  const decoded = decodeRevert(e);
+  if (decoded) return decoded;
+  return (e && (e.reason || e.shortMessage || (e.info && e.info.error && e.info.error.message) || e.message)) || String(e);
+}
+async function busy(btn, fn) {
+  const old = btn.textContent; btn.disabled = true;
+  try { await fn(); } catch (e) { console.error(e); status(errText(e), "err"); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+function node(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;   // 一律用 textContent,避免用户输入造成 XSS
+  return n;
+}
+function addrLink(addr) {
+  const a = node("a", "mono", addr);
+  a.href = `${CONFIG.explorer}/address/${ethers.getAddress(addr)}`;
+  a.target = "_blank"; a.rel = "noopener";
+  return a;
+}
+function row(k, valueNode) {
+  const r = node("div", "row"); r.append(node("span", "k", k));
+  const v = node("span", "v"); v.append(valueNode); r.append(v); return r;
+}
+const bytesLen = s => new TextEncoder().encode(s).length;
+const fmt = (v) => Number(ethers.formatUnits(v, 18)).toLocaleString("en-US", { maximumFractionDigits: 4 });
+const fmtBig = (v) => ethers.formatUnits(v, 18).replace(/\.0$/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+// ======================= 钱包 =======================
+async function ensureSepolia() {
+  const cid = await window.ethereum.request({ method: "eth_chainId" });
+  if (cid === CONFIG.chainIdHex) return;
+  try {
+    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: CONFIG.chainIdHex }] });
+  } catch (e) {
+    if (e.code === 4902) {
+      await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{
+        chainId: CONFIG.chainIdHex, chainName: "Sepolia", nativeCurrency: { name: "Sepolia ETH", symbol: "ETH", decimals: 18 },
+        rpcUrls: [CONFIG.rpc], blockExplorerUrls: [CONFIG.explorer] }] });
+    } else throw e;
+  }
+}
+async function connect() {
+  if (!window.ethereum) throw new Error("未检测到钱包,请先安装 MetaMask 等浏览器钱包");
+  await window.ethereum.request({ method: "eth_requestAccounts" });
+  await ensureSepolia();
+  const bp = new ethers.BrowserProvider(window.ethereum);
+  signer = await bp.getSigner();
+  account = await signer.getAddress();
+  $("#acct").textContent = account.slice(0, 6) + "..." + account.slice(-4);
+  $("#btnConnect").textContent = "已连接";
+  status("钱包已连接 (Sepolia)", "ok");
+  checkCreateHint();
+}
+async function needWallet() { if (!signer) await connect(); }
+
+// ======================= 项目列表 =======================
+let page = 0, total = 0;
+async function loadList() {
+  const box = $("#list"); box.replaceChildren(node("div", "empty", "加载中..."));
+  try {
+    total = Number(await launchpadRead.totalProjects());
+    const pages = Math.max(1, Math.ceil(total / CONFIG.pageSize));
+    if (page >= pages) page = pages - 1;
+    const list = total ? await launchpadRead.getProjectsDesc(page * CONFIG.pageSize, CONFIG.pageSize) : [];
+    $("#pageInfo").textContent = `第 ${page + 1} / ${pages} 页 · 共 ${total} 个项目`;
+    $("#prev").disabled = page <= 0; $("#next").disabled = page >= pages - 1;
+    box.replaceChildren();
+    if (!list.length) { box.append(node("div", "empty", "还没有项目,去「创建 Meme 币」发起第一个吧")); return; }
+    list.forEach(p => box.append(projectCard(p)));
+  } catch (e) {
+    console.error(e);
+    box.replaceChildren(node("div", "empty", "读取失败:" + errText(e)));
+  }
+}
+function projectCard(p) {
+  const c = node("div", "card");
+  const h = node("h3", "", `${p.memeName} (${p.memeSymbol})`);
+  h.append(node("span", "tag", `#${p.projectId}`));
+  c.append(h, node("div", "sub", `绑定 NFT:${p.nftName}`));
+
+  const g = node("div", "grid");
+  g.append(
+    row("NFT 合约地址", addrLink(p.nftAddress)),
+    row("NFT 名称(创建者填写)", document.createTextNode(p.nftName)),
+    row("NFT 总量 N(创建者填写)", document.createTextNode(p.nftTotal.toString())),
+    row("Vault 中可领取的 NFT 数量", document.createTextNode(p.vaultNftCount.toString())),
+    row("Meme 币合约地址", addrLink(p.memeAddress)),
+    row("Meme 币名称 / 代码", document.createTextNode(`${p.memeName} / ${p.memeSymbol}`)),
+    row("Vault 地址", addrLink(p.vaultAddress)),
+    row("创建者", addrLink(p.creator)),
+    row("创建时间", document.createTextNode(new Date(Number(p.createdAt) * 1000).toLocaleString())),
+    row("总供应量", document.createTextNode(fmtBig(p.nftTotal * 20000000n * 10n ** 18n)))
+  );
+  c.append(g);
+  if (p.description) c.append(node("div", "desc", p.description));
+  const act = node("div", "actions");
+  const b = node("button", "primary", "兑换 NFT ⇄ Meme 币");
+  b.onclick = () => openSwap(p);
+  act.append(b); c.append(act);
+  return c;
+}
+
+// ======================= 创建 =======================
+function updateCounters() {
+  document.querySelectorAll("[data-count]").forEach(h => {
+    const inp = $("#" + h.dataset.count), max = Number(inp.dataset.max), n = bytesLen(inp.value);
+    h.textContent = `${n} / ${max} 字节`; h.className = "hint" + (n > max ? " err" : "");
+  });
+  const N = Number($("#fN").value);
+  $("#supplyHint").textContent = N >= 1 && N <= 50000
+    ? `总供应量 ${fmtBig(BigInt(N) * 20000000n * 10n ** 18n)};创建者获得 50%,另 50% 进入 Vault`
+    : "";
+}
+let hintSeq = 0;
+async function checkCreateHint() {
+  const el = $("#nftHint"), addr = $("#fNft").value.trim(), seq = ++hintSeq;
+  el.textContent = ""; el.className = "hint";
+  if (!addr) return;
+  if (!ethers.isAddress(addr)) { el.textContent = "地址格式不正确"; el.className = "hint err"; return; }
+  try {
+    const t = Number(await launchpadRead.nextCreateTime(addr));
+    if (seq !== hintSeq) return;
+    let msg = "", cls = "hint ok";
+    if (t > 0) { msg = `该 NFT 合约冷却中,${new Date(t * 1000).toLocaleString()} 之后才能再创建`; cls = "hint err"; }
+    else msg = "该 NFT 合约当前可创建";
+    if (account) {
+      const bal = await new ethers.Contract(addr, ABI_ERC721, readProvider).balanceOf(account);
+      if (seq !== hintSeq) return;
+      if (bal === 0n) { msg += ";你的钱包未持有该 NFT,无法创建"; cls = "hint err"; }
+      else msg += `;你持有 ${bal} 枚`;
+    }
+    el.textContent = msg; el.className = cls;
+  } catch (e) { el.textContent = "无法读取该地址的 NFT 信息(可能不是 ERC721 合约)"; el.className = "hint warn"; }
+}
+async function createMeme() {
+  const nft = $("#fNft").value.trim(), nftName = $("#fNftName").value.trim(), N = $("#fN").value.trim(),
+        memeName = $("#fMemeName").value.trim(), symbol = $("#fSymbol").value.trim(), desc = $("#fDesc").value.trim();
+  if (!ethers.isAddress(nft)) throw new Error("NFT 合约地址格式不正确");
+  if (!nftName || bytesLen(nftName) > 120) throw new Error("NFT 名称必填且不超过 120 字节");
+  if (!/^\d+$/.test(N) || Number(N) < 1 || Number(N) > 50000) throw new Error("NFT 总量 N 须为 1 ~ 50000 的整数");
+  if (!memeName || bytesLen(memeName) > 51) throw new Error("Meme 币名称必填且不超过 51 字节");
+  if (!symbol || bytesLen(symbol) > 11) throw new Error("Meme 币代码必填且不超过 11 字节");
+  if (bytesLen(desc) > 400) throw new Error("项目描述不超过 400 字节");
+  await needWallet();
+  const lp = new ethers.Contract(CONFIG.address, ABI_LAUNCHPAD, signer);
+  const args = [nft, nftName, BigInt(N), memeName, symbol, desc];
+  status("正在模拟交易检查条件...", "", true);
+  await lp.createMeme.staticCall(...args);            // 失败时给出具体原因
+  status("请在钱包中确认交易...", "", true);
+  const tx = await lp.createMeme(...args);
+  status("交易已发送,等待链上确认...", "", true);
+  const rc = await tx.wait();
+  let info = null;
+  for (const log of rc.logs) {
+    try { const ev = lp.interface.parseLog(log); if (ev && ev.name === "MemeCreated") info = ev.args.info; } catch (_) {}
+  }
+  status("创建成功!", "ok");
+  const res = $("#createResult"); res.replaceChildren();
+  const box = node("div", "result");
+  box.append(node("b", "", "创建成功"));
+  const g = node("div", "grid");
+  if (info) g.append(
+    row("项目编号", document.createTextNode("#" + info.projectId)),
+    row("Meme 币合约", addrLink(info.memeAddress)),
+    row("Vault 合约", addrLink(info.vaultAddress)));
+  const txa = node("a", "mono", rc.hash); txa.href = `${CONFIG.explorer}/tx/${rc.hash}`; txa.target = "_blank"; txa.rel = "noopener";
+  g.append(row("交易哈希", txa));
+  box.append(g); res.append(box);
+  page = 0; loadList();
+}
+
+// ======================= 兑换 =======================
+let cur = null;
+async function openSwap(p) {
+  cur = { vault: p.vaultAddress, nft: p.nftAddress, meme: p.memeAddress };
+  $("#swTitle").textContent = `${p.memeName} (${p.memeSymbol}) ⇄ ${p.nftName}`;
+  $("#swVault").replaceChildren(addrLink(p.vaultAddress));
+  $("#swIds").value = ""; $("#swQty").value = ""; $("#swNeed").textContent = "";
+  $("#swapDlg").showModal();
+  refreshSwap();
+}
+async function refreshSwap() {
+  if (!cur) return;
+  try {
+    $("#swCount").textContent = (await new ethers.Contract(cur.vault, ABI_VAULT, readProvider).nftCount()).toString();
+    if (!account) { ["swBal", "swAllow", "swApproved"].forEach(i => $("#" + i).textContent = "(请先连接钱包)"); return; }
+    const meme = new ethers.Contract(cur.meme, ABI_ERC20, readProvider);
+    const nft = new ethers.Contract(cur.nft, ABI_ERC721, readProvider);
+    const [bal, al, ap] = await Promise.all([meme.balanceOf(account), meme.allowance(account, cur.vault), nft.isApprovedForAll(account, cur.vault)]);
+    $("#swBal").textContent = fmtBig(bal); $("#swAllow").textContent = fmtBig(al); $("#swApproved").textContent = ap ? "是" : "否";
+  } catch (e) { console.error(e); status("读取兑换信息失败:" + errText(e), "err"); }
+}
+async function doDeposit() {
+  const raw = $("#swIds").value.split(/[\s,，]+/).filter(Boolean);
+  if (!raw.length || raw.length > 20) throw new Error("请输入 1~20 个 tokenId");
+  if (raw.some(x => !/^\d+$/.test(x))) throw new Error("tokenId 必须是非负整数");
+  const ids = [...new Set(raw)].map(BigInt);
+  if (ids.length !== raw.length) throw new Error("tokenId 有重复");
+  await needWallet();
+  const nft = new ethers.Contract(cur.nft, ABI_ERC721, signer);
+  for (const id of ids) {
+    let owner; try { owner = await nft.ownerOf(id); } catch (_) { throw new Error(`tokenId ${id} 不存在`); }
+    if (owner.toLowerCase() !== account.toLowerCase()) throw new Error(`tokenId ${id} 不属于你的钱包`);
+  }
+  if (!(await nft.isApprovedForAll(account, cur.vault))) {
+    status("第 1 步:请在钱包中授权 Vault 操作你的 NFT...", "", true);
+    await (await nft.setApprovalForAll(cur.vault, true)).wait();
+  }
+  status("请在钱包中确认存入交易...", "", true);
+  const vault = new ethers.Contract(cur.vault, ABI_VAULT, signer);
+  const tx = await vault.deposit(ids);
+  status("等待链上确认...", "", true);
+  await tx.wait();
+  status(`存入成功,已收到 ${fmtBig(MEME_PER_NFT * BigInt(ids.length))} 枚 Meme 币`, "ok");
+  $("#swIds").value = ""; refreshSwap(); loadList();
+}
+async function doWithdraw() {
+  const q = $("#swQty").value.trim();
+  if (!/^\d+$/.test(q) || Number(q) < 1 || Number(q) > 20) throw new Error("数量须为 1~20 的整数");
+  const count = BigInt(q), need = count * MEME_PER_NFT;
+  await needWallet();
+  const vaultRead = new ethers.Contract(cur.vault, ABI_VAULT, readProvider);
+  if ((await vaultRead.nftCount()) < count) throw new Error("Vault 中的 NFT 数量不足");
+  const meme = new ethers.Contract(cur.meme, ABI_ERC20, signer);
+  if ((await meme.balanceOf(account)) < need) throw new Error(`Meme 币余额不足,需要 ${fmtBig(need)} 枚`);
+  if ((await meme.allowance(account, cur.vault)) < need) {
+    status("第 1 步:请在钱包中授权 Vault 使用你的 Meme 币...", "", true);
+    await (await meme.approve(cur.vault, need)).wait();
+  }
+  status("请在钱包中确认取出交易...", "", true);
+  const tx = await new ethers.Contract(cur.vault, ABI_VAULT, signer).withdraw(count);
+  status("等待链上确认...", "", true);
+  await tx.wait();
+  status(`取出成功,已收到 ${count} 枚 NFT`, "ok");
+  $("#swQty").value = ""; refreshSwap(); loadList();
+}
+
+// ======================= 事件绑定 =======================
+$("#contractLink").textContent = CONFIG.address;
+$("#contractLink").href = `${CONFIG.explorer}/address/${CONFIG.address}`;
+$("#btnConnect").onclick = e => busy(e.target, connect);
+$("#btnCreate").onclick = e => busy(e.target, createMeme);
+$("#btnDeposit").onclick = e => busy(e.target, doDeposit);
+$("#btnWithdraw").onclick = e => busy(e.target, doWithdraw);
+$("#swClose").onclick = () => $("#swapDlg").close();
+$("#prev").onclick = () => { page--; loadList(); };
+$("#next").onclick = () => { page++; loadList(); };
+$("#refresh").onclick = loadList;
+$("#fNft").addEventListener("change", checkCreateHint);
+$("#swQty").addEventListener("input", () => {
+  const q = $("#swQty").value;
+  $("#swNeed").textContent = /^\d+$/.test(q) && Number(q) > 0 ? `需支付 ${fmtBig(BigInt(q) * MEME_PER_NFT)} 枚 Meme 币` : "";
+});
+document.querySelectorAll("input[data-max],textarea[data-max],#fN").forEach(i => i.addEventListener("input", updateCounters));
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
+  $("#tab-list").hidden = b.dataset.tab !== "list";
+  $("#tab-create").hidden = b.dataset.tab !== "create";
+});
+if (window.ethereum) {
+  window.ethereum.on?.("accountsChanged", () => location.reload());
+  window.ethereum.on?.("chainChanged", () => location.reload());
+}
+updateCounters();
+loadList();
+</script>
+</body>
+</html>
